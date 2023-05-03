@@ -1,8 +1,9 @@
 import pandas as pd
 import tkinter as tk
-from tkinter import filedialog, Toplevel, Label, Canvas, Scrollbar
+from tkinter import ttk, filedialog, Toplevel, Label, Canvas, Scrollbar
 import locale
 locale.setlocale(locale.LC_ALL, 'pt_BR.UTF-8')
+
 
 
 def analisar_planilha1(arquivo):
@@ -11,88 +12,97 @@ def analisar_planilha1(arquivo):
     df = df[colunas_interesse]
     df['Valor'] = pd.to_numeric(df['Valor'], errors='coerce').fillna(0)
 
-    resultado_total = df.groupby('Coluna').agg({'Valor': 'sum', 'Instituição': 'nunique'}).reset_index()
-    resultado_total.columns = ['Coluna', 'Valor Total', 'Municípios']
-
-    resultado_conta = df.groupby('Conta').agg({'Valor': 'sum', 'Instituição': 'nunique'}).reset_index()
-    resultado_conta.columns = ['Conta', 'Valor Total', 'Municípios']
-
-    gastos_por_uf_coluna = df.groupby(['UF', 'Coluna']).agg({'Valor': 'sum'}).reset_index()
-    gastos_por_uf_conta = df.groupby(['UF', 'Conta']).agg({'Valor': 'sum'}).reset_index()
-
-    return resultado_total, resultado_conta, gastos_por_uf_coluna, gastos_por_uf_conta
+    return df
 
 
 def abrir_arquivo():
     arquivo = filedialog.askopenfilename(filetypes=[("Arquivos do Excel", "*.xlsx;*.xls"), ("Arquivos CSV", "*.csv")])
-    resultado_total, resultado_conta, gastos_por_uf_coluna, gastos_por_uf_conta = analisar_planilha1(arquivo)
-    exibir_resultados(resultado_total, resultado_conta, gastos_por_uf_coluna, gastos_por_uf_conta)
+    gastos_por_uf_conta = analisar_planilha1(arquivo)
+    # Selecionar estado e cidade antes de exibir os resultados
+    estados = sorted(gastos_por_uf_conta['UF'].unique())
+
+    def estado_selecionado(*args):
+        uf = var_estado.get()
+        municipios_disponiveis = sorted(gastos_por_uf_conta[gastos_por_uf_conta['UF'] == uf]['Instituição'].unique())
+        var_cidade.set('')
+        opcao_cidade['values'] = municipios_disponiveis
+
+    def exibir_cidade_selecionada(*args):
+        uf = var_estado.get()
+        cidade = var_cidade.get()
+        if uf and cidade:
+            exibir_resultados(uf, cidade, gastos_por_uf_conta)
+
+    janela_selecao = Toplevel()
+    janela_selecao.title("Seleção de Estado e Cidade")
+
+    var_estado = tk.StringVar(janela_selecao)
+    var_estado.trace('w', estado_selecionado)
+    opcao_estado = ttk.Combobox(janela_selecao, textvariable=var_estado, values=estados, width=35)
+    opcao_estado.grid(row=0, column=0, padx=10, pady=10)
+    estado_label = tk.Label(janela_selecao, text="Selecione o estado:", font=("Arial", 14))
+    estado_label.grid(row=0, column=1, padx=10, pady=10)
+
+    var_cidade = tk.StringVar(janela_selecao)
+    var_cidade.trace('w', exibir_cidade_selecionada)
+    opcao_cidade = ttk.Combobox(janela_selecao, textvariable=var_cidade, width=35)
+    opcao_cidade.grid(row=1, column=0, padx=10, pady=10)
+    cidade_label = tk.Label(janela_selecao, text="Selecione a cidade:", font=("Arial", 14))
+    cidade_label.grid(row=1, column=1, padx=10, pady=10)
 
 
-def exibir_resultados(resultado_total, resultado_conta, gastos_por_uf_coluna, gastos_por_uf_conta):
-    def dataframe_to_list_string(df, col_space=0):
-        formatted_rows = []
-        for index, row in df.iterrows():
-            row_str = []
-            for col in df.columns:
-                if col == 'Municípios':
-                    formatted_value = f"{col}: {int(row[col])}"
-                elif isinstance(row[col], (int, float)):
-                    formatted_value = f"{col}: {locale.currency(row[col], grouping=True)}"
-                else:
-                    formatted_value = f"{col}: {row[col]}"
-                row_str.append(formatted_value.ljust(col_space))
-            formatted_rows.append("; ".join(row_str))
-        return "\n".join(formatted_rows).replace("; Coluna", "Coluna").replace("; Conta", "Conta")
 
-    resultado_total_text = dataframe_to_list_string(resultado_total, col_space=16)
-    resultado_conta_text = dataframe_to_list_string(resultado_conta, col_space=16)
-    gastos_por_uf_coluna_text = dataframe_to_list_string(gastos_por_uf_coluna, col_space=16)
+def exibir_resultados(estado, municipio, gastos_por_uf_conta):
+    janela_resultados = Toplevel()
+    janela_resultados.title(f"Resultados para {municipio} - {estado}")
+    janela_resultados.geometry("800x600")
 
-    resultado_window = Toplevel()
-    resultado_window.title("Resultados")
-    resultado_window.geometry("1300x800")
+    # Filtrar os dados com base no município e estado selecionados
+    dados_municipio = gastos_por_uf_conta[(gastos_por_uf_conta['UF'] == estado) &
+                                          (gastos_por_uf_conta['Instituição'] == municipio)]
 
-    canvas = Canvas(resultado_window, bg="white")
-    scrollbar_y = Scrollbar(resultado_window, orient="vertical", command=canvas.yview)
-    scrollbar_x = Scrollbar(resultado_window, orient="horizontal", command=canvas.xview)
-    frame_resultados = tk.Frame(canvas, bg="white")
+    # Criar um DataFrame com os resultados consolidados por Coluna e Conta
+    resultado_por_coluna_conta = dados_municipio.groupby(['Coluna', 'Conta'])['Valor'].sum().reset_index()
 
-    canvas.configure(yscrollcommand=scrollbar_y.set, xscrollcommand=scrollbar_x.set)
+    # Criar um canvas com barra de rolagem para acomodar os dados
+    canvas = Canvas(janela_resultados)
     canvas.pack(side="left", fill="both", expand=True)
-    scrollbar_y.pack(side="right", fill="y")
-    scrollbar_x.pack(side="bottom", fill="x")
 
+    scrollbar = Scrollbar(janela_resultados, orient="vertical", command=canvas.yview)
+    scrollbar.pack(side="left", fill="y")
+
+    canvas.configure(yscrollcommand=scrollbar.set)
+    canvas.bind('<Configure>', lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+
+    # Adicionar os resultados no canvas
+    frame_resultados = tk.Frame(canvas)
     canvas.create_window((0, 0), window=frame_resultados, anchor="nw")
-    frame_resultados.bind("<Configure>", lambda event: canvas.configure(scrollregion=canvas.bbox("all")))
 
-    titulo_label = Label(frame_resultados, text="Relatório - Segundo Exercício de Contabilidade", font=("Arial", 16, "bold"), justify="left", bg="white")
-    titulo_label.pack(padx=10, pady=10)
+    current_row = 0
+    current_coluna = None
 
-    resultado_total_label = Label(frame_resultados, text="Valor Total por Categoria de despesas(só referente às funções 06, 08, 09, 10, 12):", font=("Arial", 14, "bold"), justify="left", bg="white")
-    resultado_total_label.pack(padx=10, pady=2)
-    resultado_total_text_label = Label(frame_resultados, text=resultado_total_text, font=("Arial", 14), justify="left", bg="white")
-    resultado_total_text_label.pack(padx=10, pady=2)
+    for index, row in resultado_por_coluna_conta.iterrows():
+        if current_coluna != row['Coluna']:
+            current_coluna = row['Coluna']
+            coluna_title = tk.Label(frame_resultados, text=row['Coluna'], font=("Arial", 16), pady=10)
+            coluna_title.grid(row=current_row, column=0, columnspan=3)
+            current_row += 1
 
-    resultado_conta_label = Label(frame_resultados, text="Valor Total por Funções e Quantidade de Municípios:", font=("Arial", 14, "bold"), justify="left", bg="white")
-    resultado_conta_label.pack(padx=10, pady=2)
-    resultado_conta_text_label = Label(frame_resultados, text=resultado_conta_text, font=("Arial", 14), justify="left", bg="white")
-    resultado_conta_text_label.pack(padx=10, pady=2)
+            conta_label = tk.Label(frame_resultados, text="Conta", font=("Arial", 14))
+            conta_label.grid(row=current_row, column=0, padx=10, pady=10)
 
-    gastos_por_uf_coluna_label = Label(frame_resultados, text="Gastos por Estado de Federação por Despesa:", font=("Arial", 14, "bold"), justify="left", bg="white")
-    gastos_por_uf_coluna_label.pack(padx=10, pady=2)
-    gastos_por_uf_coluna_text_label = Label(frame_resultados, text=gastos_por_uf_coluna_text, font=("Arial", 14), justify="left", bg="white")
-    gastos_por_uf_coluna_text_label.pack(padx=10, pady=2)
+            valor_label = tk.Label(frame_resultados, text="Valor", font=("Arial", 14))
+            valor_label.grid(row=current_row, column=1, padx=10, pady=10)
 
-    gastos_por_uf_conta_label = Label(frame_resultados,
-                                      text="Gasto por Estado de Federação por Função:",
-                                      font=("Arial", 14, "bold"), justify="left", bg="white")
-    gastos_por_uf_conta_label.pack(padx=10, pady=2)
-    gastos_por_uf_conta_text = dataframe_to_list_string(gastos_por_uf_conta, col_space=16)
-    gastos_por_uf_conta_text_label = Label(frame_resultados, text=gastos_por_uf_conta_text, font=("Arial", 14),
-                                           justify="left", bg="white")
-    gastos_por_uf_conta_text_label.pack(padx=10, pady=2)
+            current_row += 1
 
+        conta = tk.Label(frame_resultados, text=row['Conta'], font=("Arial", 12))
+        valor = tk.Label(frame_resultados, text=locale.currency(row['Valor'], grouping=True), font=("Arial", 12))
+
+        conta.grid(row=current_row, column=0, padx=10, pady=5)
+        valor.grid(row=current_row, column=1, padx=10, pady=5)
+
+        current_row += 1
 
 root = tk.Tk()
 root.title("Relatório - Segundo Exercício de Contabilidade")
@@ -105,6 +115,5 @@ container.pack(side="left", padx=10, pady=10)
 abrir_arquivo_button = tk.Button(container, text="Abrir Planilha", command=abrir_arquivo, anchor="w", width=11, height=2, font=("Arial", 14))
 abrir_arquivo_button.pack(pady=10)
 
-
-
 root.mainloop()
+
